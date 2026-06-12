@@ -1,0 +1,70 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: tradewind
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: password
+    ports: ['5432:5432']
+    volumes: [pgdata:/var/lib/postgresql/data]
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U postgres -d tradewind']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    ports: ['6379:6379']
+    volumes: [redisdata:/data]
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  api:
+    build: .
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      # Hosts = service names inside the compose network (NOT localhost)
+      DATABASE_URL: 'postgresql://postgres:password@postgres:5432/tradewind?schema=public'
+      REDIS_URL: 'redis://redis:6379'
+      # Secrets fall back to demo values (strong enough to pass startup validation).
+      # Override in production: `export JWT_SECRET=$(openssl rand -base64 32)` etc.
+      JWT_SECRET: '${JWT_SECRET:-tw_demo_access_3f9a1c7e5b2d8064a1f6e7c9}'
+      JWT_EXPIRES_IN: '15m'
+      JWT_REFRESH_SECRET: '${JWT_REFRESH_SECRET:-tw_demo_refresh_8b4e2a9c6d1f7053e2a7b1d0}'
+      JWT_REFRESH_EXPIRES_IN: '7d'
+      PORT: '3000'
+      # Public origin of the frontend (CORS + socket.io). Matches the frontend service.
+      FRONTEND_URL: '${FRONTEND_URL:-http://localhost:8080}'
+      NODE_ENV: 'production'
+      # Seed demo data (admin/consultant/client/factory) on first start
+      RUN_SEED: 'true'
+    ports: ['3000:3000']
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "require('http').get('http://localhost:3000/api/v1/health',r=>{process.exit(r.statusCode===200?0:1)}).on('error',()=>process.exit(1))"
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 40s
+
+  frontend:
+    build: ../frontend
+    depends_on:
+      api:
+        condition: service_healthy
+    ports: ['8080:80']
+
+volumes:
+  pgdata:
+  redisdata:

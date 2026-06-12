@@ -1,0 +1,509 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  client
+  consultant
+  factory_admin
+  platform_admin
+}
+
+enum UserStatus {
+  active
+  trial
+  blocked
+}
+
+enum ConsultantType {
+  specialized
+  general
+}
+
+enum RequestStatus {
+  draft
+  work
+  wait
+  done
+  declined
+}
+
+enum OfferStatus {
+  pending
+  accepted
+  revision
+  expired
+}
+
+enum OrderStatus {
+  draft
+  pending
+  confirmed
+  production
+  qc
+  shipped
+  transit
+  delivered
+  closed
+  cancelled
+}
+
+enum ThreadKind {
+  client
+  factory
+  support
+}
+
+enum ReviewStatus {
+  pending
+  approved
+  removed
+}
+
+enum ApplicationStatus {
+  review
+  trial
+  approved
+  rejected
+}
+
+enum AutoCheckResult {
+  pass
+  flag
+  fail
+}
+
+enum InviteRole {
+  consultant
+  factory
+}
+
+enum InviteStatus {
+  pending
+  used
+  expired
+}
+
+enum AuditAction {
+  approve
+  offer
+  status
+  login
+  block
+  invite
+  register
+  verify
+  delete
+}
+
+enum AssignRule {
+  load
+  round_robin
+}
+
+model User {
+  id            String     @id @default(uuid())
+  email         String     @unique
+  passwordHash  String
+  role          Role
+  name          String
+  phone         String?
+  city          String?
+  country       String?
+  avatarUrl     String?
+  status        UserStatus @default(active)
+  refreshToken  String?
+  createdAt     DateTime   @default(now())
+  updatedAt     DateTime   @updatedAt
+
+  consultantProfile    ConsultantProfile?
+  factoryAdmin         Factory?           @relation("FactoryOwner")
+  clientRequests       Request[]          @relation("ClientRequests")
+  reviewsAuthored      Review[]           @relation("ReviewAuthor")
+  messagesSent         Message[]
+  auditLogs            AuditLog[]         @relation("AuditActor")
+  invitesCreated       Invite[]           @relation("InviteCreator")
+  orderStatusChanges   OrderStatusHistory[]
+
+  @@index([email])
+  @@index([role])
+}
+
+model ConsultantProfile {
+  id                String         @id @default(uuid())
+  userId            String         @unique
+  user              User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type              ConsultantType @default(general)
+  title             String?
+  bio               String?
+  rating            Float          @default(0)
+  reviewsCount      Int            @default(0)
+  dealsClosed       Int            @default(0)
+  years             Int            @default(0)
+  responseTime      String?
+  languages         String[]
+  wechat            String?
+  online            Boolean        @default(false)
+  trial             Boolean        @default(true)
+  trialDealsClosed  Int            @default(0)
+  verified          Boolean        @default(false)
+
+  categories        CategoryOnConsultant[]
+  factories         ConsultantFactoryLink[]
+  offersCreated     Offer[]
+  orders            Order[]        @relation("ConsultantOrders")
+  requestsAssigned  Request[]      @relation("ConsultantRequests")
+  reviewsReceived   Review[]       @relation("ReviewConsultant")
+  applications      ConsultantFactoryApplication[]
+  incomingInvites   Invite[]       @relation("ConsultantInvite")
+
+  @@index([type])
+  @@index([rating])
+  @@index([trial])
+}
+
+model Category {
+  id          String  @id
+  name        String
+  slug        String  @unique
+  icon        String?
+  hue         Int     @default(210)
+  blurb       String?
+  factoryCount Int    @default(0)
+
+  factories        CategoryOnFactory[]
+  consultants      CategoryOnConsultant[]
+  requests         Request[]
+  applicationCats  ConsultantApplicationCategory[]
+
+  @@index([slug])
+}
+
+model CategoryOnConsultant {
+  consultantId String
+  categoryId   String
+  consultant   ConsultantProfile @relation(fields: [consultantId], references: [id], onDelete: Cascade)
+  category     Category          @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+
+  @@id([consultantId, categoryId])
+}
+
+model Factory {
+  id           String   @id @default(uuid())
+  name         String
+  nameCn       String?
+  ownerUserId  String?  @unique
+  owner        User?    @relation("FactoryOwner", fields: [ownerUserId], references: [id])
+  city         String?
+  province     String?
+  about        String?
+  staff        String?
+  area         String?
+  leadTime     String?
+  established  Int?
+  verified     Boolean  @default(false)
+  photoUrls    String[]
+  createdAt    DateTime @default(now())
+
+  categories       CategoryOnFactory[]
+  consultants      ConsultantFactoryLink[]
+  orders           Order[]
+  offers           Offer[]
+  products         Product[]
+  certs            Certificate[]
+  consultantApps   ConsultantFactoryApplication[]
+  factoryInvites   Invite[]               @relation("FactoryInvite")
+
+  @@index([verified])
+  @@index([province])
+}
+
+model CategoryOnFactory {
+  factoryId  String
+  categoryId String
+  factory    Factory  @relation(fields: [factoryId], references: [id], onDelete: Cascade)
+  category   Category @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+
+  @@id([factoryId, categoryId])
+}
+
+model ConsultantFactoryLink {
+  consultantId String
+  factoryId    String
+  consultant   ConsultantProfile @relation(fields: [consultantId], references: [id], onDelete: Cascade)
+  factory      Factory           @relation(fields: [factoryId], references: [id], onDelete: Cascade)
+  linkedAt     DateTime          @default(now())
+
+  @@id([consultantId, factoryId])
+}
+
+model Product {
+  id        String  @id @default(uuid())
+  factoryId String
+  factory   Factory @relation(fields: [factoryId], references: [id], onDelete: Cascade)
+  name      String
+  sku       String?
+  priceLo   Float?
+  priceHi   Float?
+  moq       Int?
+  leadTime  String?
+  active    Boolean @default(true)
+
+  @@index([factoryId])
+}
+
+model Certificate {
+  id        String   @id @default(uuid())
+  factoryId String
+  factory   Factory  @relation(fields: [factoryId], references: [id], onDelete: Cascade)
+  name      String
+  org       String?
+  status    String   @default("pending")
+  validTill String?
+  fileUrl   String?
+  createdAt DateTime @default(now())
+
+  @@index([factoryId])
+}
+
+model Request {
+  id           String        @id @default(uuid())
+  clientId     String
+  client       User          @relation("ClientRequests", fields: [clientId], references: [id])
+  categoryId   String
+  category     Category      @relation(fields: [categoryId], references: [id])
+  consultantId String?
+  consultant   ConsultantProfile? @relation("ConsultantRequests", fields: [consultantId], references: [id])
+  product      String
+  qty          String?
+  unit         String?
+  requirements String?
+  deadline     String?
+  budgetHint   String?
+  status       RequestStatus @default(draft)
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+
+  offers       Offer[]
+  threads      Thread[]
+
+  @@index([clientId])
+  @@index([consultantId])
+  @@index([status])
+}
+
+model Offer {
+  id           String      @id @default(uuid())
+  requestId    String
+  request      Request     @relation(fields: [requestId], references: [id])
+  consultantId String
+  consultant   ConsultantProfile @relation(fields: [consultantId], references: [id])
+  factoryId    String?
+  factory      Factory?    @relation(fields: [factoryId], references: [id])
+  product      String
+  qty          String?
+  unitPrice    Float
+  total        Float
+  leadTime     String?
+  incoterm     String?
+  note         String?
+  validTill    DateTime?
+  status       OfferStatus @default(pending)
+  createdAt    DateTime    @default(now())
+
+  order        Order?
+
+  @@index([requestId])
+  @@index([consultantId])
+  @@index([factoryId])
+  @@index([status])
+}
+
+model Order {
+  id              String      @id
+  offerId         String      @unique
+  offer           Offer       @relation(fields: [offerId], references: [id])
+  clientId        String
+  consultantId    String
+  consultant      ConsultantProfile @relation("ConsultantOrders", fields: [consultantId], references: [id])
+  factoryId       String?
+  factory         Factory?    @relation(fields: [factoryId], references: [id])
+  product         String
+  qty             String?
+  unitPrice       Float
+  total           Float
+  incoterm        String?
+  status          OrderStatus @default(draft)
+  cargoCompany    String?
+  trackingNumber  String?
+  eta             DateTime?
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+
+  statusHistory   OrderStatusHistory[]
+  threads         Thread[]
+
+  @@index([clientId])
+  @@index([consultantId])
+  @@index([factoryId])
+  @@index([status])
+}
+
+model OrderStatusHistory {
+  id        String      @id @default(uuid())
+  orderId   String
+  order     Order       @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  status    OrderStatus
+  note      String?
+  actorId   String
+  actor     User        @relation(fields: [actorId], references: [id])
+  createdAt DateTime    @default(now())
+
+  @@index([orderId])
+}
+
+model Thread {
+  id           String     @id @default(uuid())
+  kind         ThreadKind
+  clientId     String?
+  consultantId String?
+  factoryId    String?
+  requestId    String?
+  request      Request?   @relation(fields: [requestId], references: [id])
+  orderId      String?
+  order        Order?     @relation(fields: [orderId], references: [id])
+  createdAt    DateTime   @default(now())
+
+  messages     Message[]
+
+  @@index([clientId])
+  @@index([consultantId])
+  @@index([factoryId])
+  @@index([kind])
+  @@index([requestId])
+  @@index([orderId])
+}
+
+model Message {
+  id            String   @id @default(uuid())
+  threadId      String
+  thread        Thread   @relation(fields: [threadId], references: [id], onDelete: Cascade)
+  senderId      String
+  sender        User     @relation(fields: [senderId], references: [id])
+  body          String
+  attachmentUrl String?
+  readAt        DateTime?
+  createdAt     DateTime @default(now())
+
+  @@index([threadId])
+  @@index([senderId])
+}
+
+model Review {
+  id           String       @id @default(uuid())
+  authorId     String
+  author       User         @relation("ReviewAuthor", fields: [authorId], references: [id])
+  consultantId String
+  consultant   ConsultantProfile @relation("ReviewConsultant", fields: [consultantId], references: [id])
+  orderId      String?
+  rating       Int
+  text         String
+  status       ReviewStatus @default(pending)
+  autoFlag     String?
+  createdAt    DateTime     @default(now())
+
+  @@index([consultantId])
+  @@index([status])
+}
+
+model ConsultantApplication {
+  id          String            @id @default(uuid())
+  name        String
+  email       String
+  phone       String?
+  city        String?
+  years       Int               @default(0)
+  languages   String[]
+  motivation  String?
+  autoCheck   AutoCheckResult   @default(flag)
+  status      ApplicationStatus @default(review)
+  createdAt   DateTime          @default(now())
+
+  categories  ConsultantApplicationCategory[]
+
+  @@index([status])
+  @@index([autoCheck])
+}
+
+model ConsultantApplicationCategory {
+  applicationId String
+  categoryId    String
+  application   ConsultantApplication @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  category      Category              @relation(fields: [categoryId], references: [id])
+
+  @@id([applicationId, categoryId])
+}
+
+model ConsultantFactoryApplication {
+  id           String            @id @default(uuid())
+  consultantId String
+  consultant   ConsultantProfile @relation(fields: [consultantId], references: [id])
+  factoryId    String
+  factory      Factory           @relation(fields: [factoryId], references: [id])
+  pitch        String?
+  status       ApplicationStatus @default(review)
+  createdAt    DateTime          @default(now())
+
+  @@unique([consultantId, factoryId])
+  @@index([factoryId])
+  @@index([status])
+}
+
+model Invite {
+  id          String       @id @default(uuid())
+  token       String       @unique @default(uuid())
+  role        InviteRole
+  email       String
+  createdById String
+  createdBy   User         @relation("InviteCreator", fields: [createdById], references: [id])
+  factoryId   String?
+  factory     Factory?     @relation("FactoryInvite", fields: [factoryId], references: [id])
+  consultantId String?
+  consultant  ConsultantProfile? @relation("ConsultantInvite", fields: [consultantId], references: [id])
+  status      InviteStatus @default(pending)
+  expiresAt   DateTime
+  createdAt   DateTime     @default(now())
+
+  @@index([token])
+  @@index([email])
+  @@index([status])
+}
+
+model AuditLog {
+  id        String      @id @default(uuid())
+  actorId   String
+  actor     User        @relation("AuditActor", fields: [actorId], references: [id])
+  action    AuditAction
+  target    String?
+  ip        String?
+  createdAt DateTime    @default(now())
+
+  @@index([actorId])
+  @@index([action])
+  @@index([createdAt])
+}
+
+model PlatformSettings {
+  id                    Int     @id @default(1)
+  trialOrders           Int     @default(5)
+  warnThreshold         Float   @default(3.5)
+  blockThreshold        Float   @default(3.0)
+  autoApprove           Boolean @default(false)
+  autoAssign            Boolean @default(true)
+  assignRule            AssignRule @default(load)
+}
